@@ -32,7 +32,10 @@ use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 use OCP\IConfig;
 use OCP\ILogger;
+use OCP\IURLGenerator;
 use OCP\IUser;
+use OCP\IUserManager;
+use OCP\Notification\IManager;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
 class Manager implements ICommentsManager {
@@ -52,6 +55,15 @@ class Manager implements ICommentsManager {
 	/** @var IComment[]  */
 	protected $commentsCache = [];
 
+	/** @var IManager  */
+	protected $notificationManager;
+
+	/** @var IUserManager  */
+	protected $userManager;
+
+	/** @var IURLGenerator  */
+	protected $urlGenerator;
+
 	/**
 	 * Manager constructor.
 	 *
@@ -59,17 +71,26 @@ class Manager implements ICommentsManager {
 	 * @param ILogger $logger
 	 * @param IConfig $config
 	 * @param EventDispatcherInterface $dispatcher
+	 * @param IManager $notificationManager
+	 * @param IUserManager $userManager
+	 * @param IURLGenerator $urlGenerator
 	 */
 	public function __construct(
 		IDBConnection $dbConn,
 		ILogger $logger,
 		IConfig $config,
-		EventDispatcherInterface $dispatcher
+		EventDispatcherInterface $dispatcher,
+		IManager $notificationManager,
+		IUserManager $userManager,
+		IURLGenerator $urlGenerator
 	) {
 		$this->dbConn = $dbConn;
 		$this->logger = $logger;
 		$this->config = $config;
 		$this->dispatcher = $dispatcher;
+		$this->notificationManager = $notificationManager;
+		$this->userManager = $userManager;
+		$this->urlGenerator = $urlGenerator;
 	}
 
 	/**
@@ -481,8 +502,10 @@ class Manager implements ICommentsManager {
 	 * @since 9.0.0
 	 */
 	public function save(IComment $comment) {
+		$triggerNotifications = false;
 		if($this->prepareCommentForDatabaseWrite($comment)->getId() === '') {
 			$result = $this->insert($comment);
+			$triggerNotifications = true;
 		} else {
 			$result = $this->update($comment);
 		}
@@ -493,6 +516,10 @@ class Manager implements ICommentsManager {
 					$comment->getCreationDateTime()
 			);
 			$this->cache($comment);
+		}
+
+		if($result && $triggerNotifications) {
+			$this->triggerNotifications($comment);
 		}
 
 		return $result;
@@ -750,5 +777,32 @@ class Manager implements ICommentsManager {
 			return false;
 		}
 		return ($affectedRows > 0);
+	}
+
+	protected function triggerNotifications(IComment $comment) {
+		$ok = preg_match_all('/\B@[a-z0-9_-]+/i', $comment->getMessage(), $mentions);
+		if(!$ok || !isset($mentions[0]) || !is_array($mentions[0])) {
+			return;
+		}
+
+		foreach($mentions[0] as $mention) {
+			$user = substr($mention, 1); // @username → username
+			if(!$this->userManager->userExists($user)) {
+				continue;
+			}
+			$notification = $this->notificationManager->createNotification();
+			$notification
+				->setApp('comments')
+				->setUser($user)
+				->setObject('comment', $comment->getId())
+				->setSubject('mention', [ $comment->getObjectType(), $comment->getObjectId() ])
+				->setDateTime($comment->getCreationDateTime())
+				->setLink($this->urlGenerator->linkToRoute(
+					'comments.Notifications.view',
+					['id' => $comment->getId()])
+				);
+
+			$this->notificationManager->notify($notification);
+		}
 	}
 }
