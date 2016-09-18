@@ -21,6 +21,9 @@ class FileTest extends \Test\TestCase {
 	/** @var \OC\Files\View|\PHPUnit_Framework_MockObject_MockObject */
 	private $view;
 
+	/** @var \OCP\Files\Config\IUserMountCache|\PHPUnit_Framework_MockObject_MockObject */
+	private $userMountCache;
+
 	protected function setUp() {
 		parent::setUp();
 		$config = $this->getMockBuilder('\OCP\IConfig')
@@ -32,6 +35,9 @@ class FileTest extends \Test\TestCase {
 			->disableOriginalConstructor()
 			->getMock();
 		$this->view = $this->getMockBuilder('\OC\Files\View')
+			->disableOriginalConstructor()
+			->getMock();
+		$this->userMountCache = $this->getMockBuilder('\OCP\Files\Config\IUserMountCache')
 			->disableOriginalConstructor()
 			->getMock();
 	}
@@ -102,7 +108,7 @@ class FileTest extends \Test\TestCase {
 			$hooksRun++;
 		};
 
-		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user);
+		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user, $this->userMountCache);
 		$root->listen('\OC\Files', 'preDelete', $preListener);
 		$root->listen('\OC\Files', 'postDelete', $postListener);
 
@@ -259,7 +265,7 @@ class FileTest extends \Test\TestCase {
 		fwrite($stream, 'bar');
 		rewind($stream);
 
-		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user);
+		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user, $this->userMountCache);
 
 		$hook = function ($file) {
 			throw new \Exception('Hooks are not supposed to be called');
@@ -287,7 +293,7 @@ class FileTest extends \Test\TestCase {
 	public function testFOpenWrite() {
 		$stream = fopen('php://memory', 'w+');
 
-		$root = new \OC\Files\Node\Root($this->manager, new $this->view, $this->user);
+		$root = new \OC\Files\Node\Root($this->manager, new $this->view, $this->user, $this->userMountCache);
 
 		$hooksCalled = 0;
 		$hook = function ($file) use (&$hooksCalled) {
@@ -320,7 +326,7 @@ class FileTest extends \Test\TestCase {
 	 * @expectedException \OCP\Files\NotPermittedException
 	 */
 	public function testFOpenReadNotPermitted() {
-		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user);
+		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user, $this->userMountCache);
 
 		$hook = function ($file) {
 			throw new \Exception('Hooks are not supposed to be called');
@@ -339,7 +345,7 @@ class FileTest extends \Test\TestCase {
 	 * @expectedException \OCP\Files\NotPermittedException
 	 */
 	public function testFOpenReadWriteNoReadPermissions() {
-		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user);
+		$root = new \OC\Files\Node\Root($this->manager, $this->view, $this->user, $this->userMountCache);
 
 		$hook = function () {
 			throw new \Exception('Hooks are not supposed to be called');
@@ -358,7 +364,7 @@ class FileTest extends \Test\TestCase {
 	 * @expectedException \OCP\Files\NotPermittedException
 	 */
 	public function testFOpenReadWriteNoWritePermissions() {
-		$root = new \OC\Files\Node\Root($this->manager, new $this->view, $this->user);
+		$root = new \OC\Files\Node\Root($this->manager, new $this->view, $this->user, $this->userMountCache);
 
 		$hook = function () {
 			throw new \Exception('Hooks are not supposed to be called');

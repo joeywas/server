@@ -28,6 +28,7 @@ namespace OC\Files\Node;
 
 use OC\DB\QueryBuilder\Literal;
 use OCP\DB\QueryBuilder\IQueryBuilder;
+use OCP\Files\Config\ICachedMountInfo;
 use OCP\Files\FileInfo;
 use OCP\Files\Mount\IMountPoint;
 use OCP\Files\NotFoundException;
@@ -83,7 +84,7 @@ class Folder extends Node implements \OCP\Files\Folder {
 	public function getDirectoryListing() {
 		$folderContent = $this->view->getDirectoryContent($this->path);
 
-		return array_map(function(FileInfo $info) {
+		return array_map(function (FileInfo $info) {
 			if ($info->getMimetype() === 'httpd/unix-directory') {
 				return new Folder($this->root, $this->view, $info->getPath(), $info);
 			} else {
@@ -253,7 +254,7 @@ class Folder extends Node implements \OCP\Files\Folder {
 			}
 		}
 
-		return array_map(function(FileInfo $file) {
+		return array_map(function (FileInfo $file) {
 			return $this->createNode($file->getPath(), $file);
 		}, $files);
 	}
@@ -263,29 +264,42 @@ class Folder extends Node implements \OCP\Files\Folder {
 	 * @return \OC\Files\Node\Node[]
 	 */
 	public function getById($id) {
+		$mountCache = $this->root->getUserMountCache();
+		$mountsContainingFile = $mountCache->getMountsForFileId($id);
 		$mounts = $this->root->getMountsIn($this->path);
 		$mounts[] = $this->root->getMount($this->path);
-		// reverse the array so we start with the storage this view is in
-		// which is the most likely to contain the file we're looking for
-		$mounts = array_reverse($mounts);
+		/** @var IMountPoint[] $folderMounts */
+		$folderMounts = array_combine(array_map(function (IMountPoint $mountPoint) {
+			return $mountPoint->getMountPoint();
+		}, $mounts), $mounts);
 
-		$nodes = array();
-		foreach ($mounts as $mount) {
-			/**
-			 * @var \OC\Files\Mount\MountPoint $mount
-			 */
-			if ($mount->getStorage()) {
-				$cache = $mount->getStorage()->getCache();
-				$internalPath = $cache->getPathById($id);
-				if (is_string($internalPath)) {
-					$fullPath = $mount->getMountPoint() . $internalPath;
-					if (!is_null($path = $this->getRelativePath($fullPath))) {
-						$nodes[] = $this->get($path);
-					}
-				}
-			}
+		/** @var ICachedMountInfo[] $mountsContainingFile */
+		$mountsContainingFile = array_values(array_filter($mountsContainingFile, function (ICachedMountInfo $cachedMountInfo) use ($folderMounts) {
+			return isset($folderMounts[$cachedMountInfo->getMountPoint()]);
+		}));
+
+		if (count($mountsContainingFile) === 0) {
+			return [];
 		}
-		return $nodes;
+
+		// we only need to get the cache info once, since all mounts we found point to the same storage
+
+		$mount = $folderMounts[$mountsContainingFile[0]->getMountPoint()];
+		$fileInfo = $mount->getStorage()->getCache()->get($id);
+
+		$nodes = array_map(function (ICachedMountInfo $cachedMountInfo) use ($fileInfo, $folderMounts) {
+			$pathRelativeToMount = substr($fileInfo->getPath(), strlen($cachedMountInfo->getRootInternalPath()));
+			$pathRelativeToMount = ltrim($pathRelativeToMount, '/');
+			$absolutePath = $cachedMountInfo->getMountPoint() . $pathRelativeToMount;
+			$mount = $folderMounts[$cachedMountInfo->getMountPoint()];
+			return $this->root->createNode($absolutePath, new \OC\Files\FileInfo(
+				$absolutePath, $mount->getStorage(), $fileInfo->getPath(), $fileInfo, $mount
+			));
+		}, $mountsContainingFile);
+
+		return array_filter($nodes, function(Node $node) {
+			return $this->getRelativePath($node->getPath());
+		});
 	}
 
 	public function getFreeSpace() {
