@@ -21,7 +21,7 @@
  */
 namespace OCA\DAV;
 
-use OC\L10N\L10N;
+use OCP\L10N\IL10N;
 use OCA\DAV\CalDAV\BirthdayService;
 use OCA\DAV\CalDAV\CalDavBackend;
 use OCA\DAV\CardDAV\CardDavBackend;
@@ -54,7 +54,7 @@ class HookManager {
 								SyncService $syncService,
 								CalDavBackend $calDav,
 								CardDavBackend $cardDav,
-								L10N $l10n) {
+								IL10N $l10n) {
 		$this->userManager = $userManager;
 		$this->syncService = $syncService;
 		$this->calDav = $calDav;
