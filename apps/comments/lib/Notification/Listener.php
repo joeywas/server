@@ -22,6 +22,7 @@
 namespace OCA\Comments\Notification;
 
 use OCP\Comments\CommentsEvent;
+use OCP\Comments\IComment;
 use OCP\IURLGenerator;
 use OCP\IUserManager;
 use OCP\Notification\IManager;
@@ -65,22 +66,13 @@ class Listener {
 			return;
 		}
 
-		$ok = preg_match_all('/\B@[a-z0-9_\-@\.\']+/i', $comment->getMessage(), $mentions);
-		if(!$ok || !isset($mentions[0]) || !is_array($mentions[0])) {
+		$mentions = $this->extractMentions($comment->getMessage());
+		if(empty($mentions)) {
+			// no one to notify
 			return;
 		}
-		$mentions = array_unique($mentions[0]);
 
-		$notification = $this->notificationManager->createNotification();
-		$notification
-			->setApp('comments')
-			->setObject('comment', $comment->getId())
-			->setSubject('mention', [ $comment->getObjectType(), $comment->getObjectId() ])
-			->setDateTime($comment->getCreationDateTime())
-			->setLink($this->urlGenerator->linkToRouteAbsolute(
-				'comments.Notifications.view',
-				['id' => $comment->getId()])
-			);
+		$notification = $this->instantiateNotification($comment);
 
 		foreach($mentions as $mention) {
 			$user = substr($mention, 1); // @username → username
@@ -92,7 +84,46 @@ class Listener {
 			}
 
 			$notification->setUser($user);
-			$this->notificationManager->notify($notification);
+			if($event->getEvent() === CommentsEvent::EVENT_DELETE) {
+				$this->notificationManager->markProcessed($notification);
+			} else {
+				$this->notificationManager->notify($notification);
+			}
 		}
+	}
+
+	/**
+	 * creates a notification instance and fills it with comment data
+	 *
+	 * @param IComment $comment
+	 * @return \OCP\Notification\INotification
+	 */
+	public function instantiateNotification(IComment $comment) {
+		$notification = $this->notificationManager->createNotification();
+		$notification
+			->setApp('comments')
+			->setObject('comment', $comment->getId())
+			->setSubject('mention', [ $comment->getObjectType(), $comment->getObjectId() ])
+			->setDateTime($comment->getCreationDateTime())
+			->setLink($this->urlGenerator->linkToRouteAbsolute(
+				'comments.Notifications.view',
+				['id' => $comment->getId()])
+			);
+
+		return $notification;
+	}
+
+	/**
+	 * extracts @-mentions out of a message body.
+	 *
+	 * @param string $message
+	 * @return string[] containing the mentions, e.g. ['@alice', '@bob']
+	 */
+	public function extractMentions($message) {
+		$ok = preg_match_all('/\B@[a-z0-9_\-@\.\']+/i', $message, $mentions);
+		if(!$ok || !isset($mentions[0]) || !is_array($mentions[0])) {
+			return [];
+		}
+		return array_unique($mentions[0]);
 	}
 }

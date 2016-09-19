@@ -22,6 +22,7 @@
 namespace OCA\Comments\Notification;
 
 use OCP\Comments\ICommentsManager;
+use OCP\Comments\NotFoundException;
 use OCP\Files\Folder;
 use OCP\IUserManager;
 use OCP\L10N\IFactory;
@@ -65,7 +66,12 @@ class Notifier implements INotifier {
 			throw  new \InvalidArgumentException();
 		}
 		$l = $this->l10nFactory->get('comments', $languageCode);
-		$comment = $this->commentsManager->get($notification->getObjectId());
+		try {
+			$comment = $this->commentsManager->get($notification->getObjectId());
+		} catch(NotFoundException $e) {
+			// needs to be converted to InvalidArgumentException, otherwise none Notifications will be shown at all
+			throw new \InvalidArgumentException('Comment not found', 0, $e);
+		}
 		$displayName = $comment->getActorId();
 		if($comment->getActorType() === 'users') {
 			$commenter = $this->userManager->get($comment->getActorId());
@@ -82,6 +88,9 @@ class Notifier implements INotifier {
 					throw new \InvalidArgumentException('Unsupported comment object');
 				}
 				$nodes = $this->userFolder->getById($parameters[1]);
+				if(empty($nodes)) {
+					throw new \InvalidArgumentException('Cannot resolve file id to Node instance');
+				}
 				$fileName = $nodes[0]->getName();
 				$notification->setParsedSubject(
 					(string) $l->t(
